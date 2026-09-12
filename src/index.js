@@ -55,6 +55,10 @@ const ticketButtons = ticket => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId("ticket_priority").setLabel("Priority").setEmoji("⚡").setStyle(ButtonStyle.Secondary),
   new ButtonBuilder().setCustomId("ticket_close").setLabel("Close").setEmoji("🔒").setStyle(ButtonStyle.Danger)
 );
+const closedTicketButtons = () => new ActionRowBuilder().addComponents(
+  new ButtonBuilder().setCustomId("ticket_reopen").setLabel("Reopen").setEmoji("🔓").setStyle(ButtonStyle.Success),
+  new ButtonBuilder().setCustomId("ticket_delete").setLabel("Delete Ticket").setEmoji("🗑️").setStyle(ButtonStyle.Danger)
+);
 const panelComponents = () => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId("ticket_open").setPlaceholder("Choose a support department...").addOptions(categories.map(c => ({ label: c.label, description: c.description, value: c.id, emoji: c.emoji }))));
 
 const slash = [
@@ -62,6 +66,7 @@ const slash = [
   new SlashCommandBuilder().setName("ticket").setDescription("Open a ticket directly") .addStringOption(o => o.setName("category").setDescription("Support department").setRequired(true).addChoices(...categories.map(c => ({ name: c.label, value: c.id })))),
   new SlashCommandBuilder().setName("close").setDescription("Close the current ticket").addStringOption(o => o.setName("reason").setDescription("Closing reason")),
   new SlashCommandBuilder().setName("reopen").setDescription("Reopen a closed ticket"),
+  new SlashCommandBuilder().setName("delete").setDescription("Delete the current closed ticket channel"),
   new SlashCommandBuilder().setName("claim").setDescription("Claim the current ticket"),
   new SlashCommandBuilder().setName("unclaim").setDescription("Release the current ticket claim"),
   new SlashCommandBuilder().setName("add").setDescription("Add a member to the current ticket").addUserOption(o => o.setName("user").setDescription("Member").setRequired(true)),
@@ -127,9 +132,17 @@ async function closeTicket(ctx, ticket, reason = "No reason provided") {
   ticket.status = "closed"; ticket.closeReason = reason; ticket.updatedAt = now(); save(); addEvent(ticket, ctx.user.id, "closed", reason);
   await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: false }).catch(() => {});
   if (config.closedCategoryId) await channel.setParent(config.closedCategoryId).catch(() => {});
-  await channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("Ticket closed").setDescription(`Closed by <@${ctx.user.id}>\n**Reason:** ${reason}\nThis channel is now read-only. Staff can reopen it with \`/reopen\`.`).setTimestamp()] });
+  await channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("Ticket closed").setDescription(`Closed by <@${ctx.user.id}>\n**Reason:** ${reason}\nThis channel is now read-only. Staff can reopen it or permanently delete it.`).setTimestamp()], components: [closedTicketButtons()] });
   await sendAudit(ctx.guild, `🔒 Ticket #${ticket.number} closed by <@${ctx.user.id}>. Reason: ${reason}`, attachment);
   return ok(`Ticket #${ticket.number} closed and transcript logged.`);
+}
+async function deleteTicket(ctx, ticket) {
+  if (!ticket) return fail("This command must be used inside a ticket channel.");
+  if (!canStaff(ctx)) return fail("Only support staff can permanently delete tickets.");
+  ticket.status = "deleted"; ticket.deletedAt = now(); ticket.deletedBy = ctx.user.id; save(); addEvent(ticket, ctx.user.id, "deleted");
+  await sendAudit(ctx.guild, `🗑️ Ticket #${ticket.number} permanently deleted by <@${ctx.user.id}>.`);
+  await ctx.channel.delete(`Ticket #${ticket.number} deleted by ${ctx.user.tag || ctx.user.id}`);
+  return null;
 }
 async function reopenTicket(ctx, ticket) {
   if (!ticket) return fail("This command must be used inside a ticket channel.");
@@ -165,6 +178,12 @@ async function handleCommand(ctx, command, args = {}) {
   const ticket = currentTicket(ctx);
   if (command === "close") return ctx.reply(await closeTicket(ctx, ticket, args.reason));
   if (command === "reopen") return ctx.reply(await reopenTicket(ctx, ticket));
+  if (command === "delete") {
+    if (!ticket) return ctx.reply(fail("This command must be used inside a ticket channel."));
+    if (!canStaff(ctx)) return ctx.reply(fail("Only support staff can permanently delete tickets."));
+    await ctx.reply("🗑️ Deleting this ticket channel...");
+    return deleteTicket(ctx, ticket);
+  }
   if (command === "claim" || command === "unclaim") return ctx.reply(await claimTicket(ctx, ticket));
   if (command === "add" || command === "remove") return ctx.reply(await participant(ctx, ticket, args.user, command === "add"));
   if (command === "rename") { if (!ticket || !canStaff(ctx)) return ctx.reply(fail("Only support staff can rename a ticket.")); await ctx.channel.setName(safe(args.name)); addEvent(ticket, ctx.user.id, "renamed", args.name); return ctx.reply(ok(`Ticket renamed to **${safe(args.name)}**.`)); }
@@ -199,6 +218,12 @@ client.on("interactionCreate", async interaction => {
       const ticket = currentTicket(interaction); const ctx = { guild: interaction.guild, channel: interaction.channel, user: interaction.user, member: interaction.member, reply: x => interaction.reply(x) };
       if (interaction.customId === "ticket_close") { const modal = new ModalBuilder().setCustomId("ticket_close_modal").setTitle("Close ticket"); const reason = new TextInputBuilder().setCustomId("reason").setLabel("Closing reason").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500); return interaction.showModal(modal.addComponents(new ActionRowBuilder().addComponents(reason))); }
       if (interaction.customId === "ticket_claim") return interaction.reply(await claimTicket(ctx, ticket));
+      if (interaction.customId === "ticket_reopen") return interaction.reply(await reopenTicket(ctx, ticket));
+      if (interaction.customId === "ticket_delete") {
+        if (!canStaff(ctx)) return interaction.reply({ content: fail("Only support staff can permanently delete tickets."), ephemeral: true });
+        await interaction.reply("🗑️ Deleting this ticket channel...");
+        return deleteTicket(ctx, ticket);
+      }
       if (interaction.customId === "ticket_priority") { if (!canStaff(ctx)) return interaction.reply(fail("Only support staff can change priority.")); return interaction.reply({ content: "Use `/priority` with low, normal, high or urgent.", ephemeral: true }); }
       if (interaction.customId === "ticket_add") return interaction.reply({ content: "Use `/add @member` to add a participant.", ephemeral: true });
     }
@@ -223,7 +248,7 @@ client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
   const match = message.content.match(new RegExp(`^\\${prefix}([\\w-]+)(?:\\s+([\\s\\S]*))?$`, "i"));
   if (!match) return;
-  const aliases = { panel: "ticket-panel", tickets: "ticket-help", close: "close", reopen: "reopen", claim: "claim", unclaim: "unclaim", add: "add", remove: "remove", rename: "rename", priority: "priority", transcript: "transcript", stats: "ticket-stats", help: "ticket-help", open: "ticket" };
+  const aliases = { panel: "ticket-panel", tickets: "ticket-help", close: "close", reopen: "reopen", delete: "delete", del: "delete", claim: "claim", unclaim: "unclaim", add: "add", remove: "remove", rename: "rename", priority: "priority", transcript: "transcript", stats: "ticket-stats", help: "ticket-help", open: "ticket" };
   const command = aliases[match[1].toLowerCase()] || match[1].toLowerCase(); const raw = match[2] || "";
   const ctx = { guild: message.guild, channel: message.channel, user: message.author, member: message.member, reply: x => message.reply(x) };
   const args = {};

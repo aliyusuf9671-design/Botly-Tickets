@@ -10,6 +10,7 @@
 - Modal intake form requiring useful opening details.
 - Private ticket channels with configurable category routing and support role access.
 - Ticket lifecycle: open, claimed, closed, and reopened.
+- Closed tickets show **Reopen** and **Delete Ticket** buttons; permanent deletion is staff-only.
 - Staff claim/unclaim workflow.
 - Add and remove ticket participants.
 - Rename tickets and set low, normal, high, or urgent priority.
@@ -106,6 +107,7 @@ Enable the **Server Members Intent** and **Message Content Intent** in the Disco
 | `/ticket` or `!open` | Open a ticket directly |
 | `/close` | Close the current ticket and generate a transcript |
 | `/reopen` | Reopen a closed ticket |
+| `/delete` or `!delete` | Permanently delete the current ticket channel; staff only |
 | `/claim` and `/unclaim` | Assign or release a ticket |
 | `/add` and `/remove` | Manage participants |
 | `/rename` | Rename a ticket channel |
