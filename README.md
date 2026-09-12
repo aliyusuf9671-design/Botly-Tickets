@@ -42,6 +42,8 @@ Open **OAuth2 → URL Generator**. Select the `bot` and `applications.commands` 
 
 The repository includes `package.json`, so the host should install dependencies automatically. If the dashboard asks for an install command, use `npm install`.
 
+**Important:** Do not set the startup file or command to `.env`. `.env` is a configuration file, not a JavaScript module. Set the startup command to `npm start` (or `node src/index.js`) and add `DISCORD_TOKEN` in Bot-Hosting.net's environment-variable manager. A physical `.env` file is not required on the host.
+
 ### 3. Add environment variables
 
 Open the deployment’s **Environment Variables** or **Startup & Env Variables Manager** and add:

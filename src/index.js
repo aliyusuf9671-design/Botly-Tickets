@@ -1,4 +1,4 @@
-require("dotenv").config();
+try { require("dotenv").config(); } catch (error) { console.warn("dotenv file not loaded; using host environment variables."); }
 const {
   Client, GatewayIntentBits, Partials, PermissionsBitField, ChannelType,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
