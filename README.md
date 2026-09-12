@@ -7,6 +7,7 @@
 - Ticket creation panel titled **📞 | Contact Botly.Dev Support** with department dropdown: General, Billing, Technical, and Reports.
 - Panel wording: “Choose an Area / Category Based On Your Needs.” with the note “For Purchases Please Read Pricing.”
 - Billing intake form: **Item / Service**, **Payment Method**, and optional **Extra Info**.
+- Partnership sticky panel with an **OPEN A TICKET** button and `partnership-####` ticket channels.
 - Modal intake form requiring useful opening details.
 - Private ticket channels with configurable category routing and support role access.
 - Ticket lifecycle: open, claimed, closed, and reopened.
@@ -104,6 +105,7 @@ Enable the **Server Members Intent** and **Message Content Intent** in the Disco
 | Command | Purpose |
 |---|---|
 | `/ticket-panel` or `!panel` | Post the department selector panel |
+| `/partner stick` | Post “Looking to Partner with us? Open a ticket!” in a selected channel |
 | `/ticket` or `!open` | Open a ticket directly |
 | `/close` | Close the current ticket and generate a transcript |
 | `/reopen` | Reopen a closed ticket |

@@ -40,7 +40,8 @@ const categories = [
   { id: "technical", label: "Technical Support", description: "Bugs, setup and technical issues", emoji: "🛠️" },
   { id: "report", label: "Report a Problem", description: "Report a member or server issue", emoji: "🚩" }
 ];
-const categoryFor = id => categories.find(c => c.id === id) || categories[0];
+const partnershipCategory = { id: "partnership", label: "Partnership", description: "Business and server partnerships", emoji: "🤝" };
+const categoryFor = id => [...categories, partnershipCategory].find(c => c.id === id) || categories[0];
 const ticketByChannel = channelId => Object.values(db.tickets).find(t => t.channelId === channelId && t.status !== "deleted");
 const ticketById = id => db.tickets[id];
 const isStaff = member => Boolean(member?.permissions?.has(PermissionsBitField.Flags.ManageChannels) || (config.supportRoleId && member?.roles?.cache?.has(config.supportRoleId)));
@@ -60,10 +61,12 @@ const closedTicketButtons = () => new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId("ticket_delete").setLabel("Delete Ticket").setEmoji("🗑️").setStyle(ButtonStyle.Danger)
 );
 const panelComponents = () => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId("ticket_open").setPlaceholder("Choose a support department...").addOptions(categories.map(c => ({ label: c.label, description: c.description, value: c.id, emoji: c.emoji }))));
+const partnershipButton = () => new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("partner_open").setLabel("OPEN A TICKET").setEmoji("📞").setStyle(ButtonStyle.Primary));
 
 const slash = [
   new SlashCommandBuilder().setName("ticket-panel").setDescription("Post the ticket creation panel"),
   new SlashCommandBuilder().setName("ticket").setDescription("Open a ticket directly") .addStringOption(o => o.setName("category").setDescription("Support department").setRequired(true).addChoices(...categories.map(c => ({ name: c.label, value: c.id })))),
+  new SlashCommandBuilder().setName("partner").setDescription("Manage the partnership ticket panel").addSubcommand(s => s.setName("stick").setDescription("Post a partnership ticket message").addChannelOption(o => o.setName("channel").setDescription("Channel where the message should be posted").addChannelTypes(ChannelType.GuildText).setRequired(true))),
   new SlashCommandBuilder().setName("close").setDescription("Close the current ticket").addStringOption(o => o.setName("reason").setDescription("Closing reason")),
   new SlashCommandBuilder().setName("reopen").setDescription("Reopen a closed ticket"),
   new SlashCommandBuilder().setName("delete").setDescription("Delete the current closed ticket channel"),
@@ -116,7 +119,7 @@ async function createTicket(ctx, categoryId, details = "") {
     { id: ctx.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] }
   ];
   if (config.supportRoleId) overwrites.push({ id: config.supportRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] });
-  const channel = await ctx.guild.channels.create({ name: `ticket-${String(number).padStart(4, "0")}-${category.id}`, type: ChannelType.GuildText, parent: config.ticketCategoryId || undefined, topic: `botly-ticket:${id}:${ctx.user.id}:open`, permissionOverwrites: overwrites });
+  const channel = await ctx.guild.channels.create({ name: category.id === "partnership" ? `partnership-${String(number).padStart(4, "0")}` : `ticket-${String(number).padStart(4, "0")}-${category.id}`, type: ChannelType.GuildText, parent: config.ticketCategoryId || undefined, topic: `botly-ticket:${id}:${ctx.user.id}:open`, permissionOverwrites: overwrites });
   const ticket = { id, number, guildId: ctx.guild.id, channelId: channel.id, ownerId: ctx.user.id, category: category.id, status: "open", priority: "normal", claimedBy: null, createdAt: now(), updatedAt: now(), closeReason: null };
   db.tickets[id] = ticket; save(); addEvent(ticket, ctx.user.id, "created", category.label);
   await channel.send({ content: `<@${ctx.user.id}>${config.supportRoleId ? ` <@&${config.supportRoleId}>` : ""}`, embeds: [ticketEmbed(ticket)], components: [ticketButtons(ticket)] });
@@ -170,6 +173,13 @@ async function participant(ctx, ticket, user, adding) {
   return ok(`${adding ? "Added" : "Removed"} <@${user.id}> ${adding ? "to" : "from"} the ticket.`);
 }
 async function handleCommand(ctx, command, args = {}) {
+  if (command === "partner" && args.subcommand === "stick") {
+    if (!canStaff(ctx)) return ctx.reply(fail("Only support staff can post partnership panels."));
+    const target = args.channel;
+    if (!target?.isTextBased()) return ctx.reply(fail("Choose a text channel for the partnership message."));
+    await target.send({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("Looking to Partner with us?").setDescription("Open a ticket!")], components: [partnershipButton()] });
+    return ctx.reply(ok(`Partnership ticket message posted in <#${target.id}>.`));
+  }
   if (command === "ticket-panel") {
     if (!canStaff(ctx)) return fail("Only support staff can post ticket panels.");
     return ctx.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("📞  |  Contact Botly.Dev Support").setDescription("Choose an Area / Category Based On Your Needs.\n\n**Note:** For Purchases Please Read Pricing.")], components: [panelComponents()] });
@@ -207,6 +217,16 @@ client.on("interactionCreate", async interaction => {
       const details = new TextInputBuilder().setCustomId("details").setLabel("How can we help?").setStyle(TextInputStyle.Paragraph).setPlaceholder("Include relevant details, links or error messages...").setRequired(true).setMaxLength(2000);
       return interaction.showModal(modal.addComponents(new ActionRowBuilder().addComponents(details)));
     }
+    if (interaction.isButton() && interaction.customId === "partner_open") {
+      const modal = new ModalBuilder().setCustomId("partnership_modal").setTitle("Partnership request");
+      const organization = new TextInputBuilder().setCustomId("partner_name").setLabel("Server / Company Name").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100);
+      const details = new TextInputBuilder().setCustomId("partner_details").setLabel("Tell us about the partnership").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500);
+      return interaction.showModal(modal.addComponents(new ActionRowBuilder().addComponents(organization), new ActionRowBuilder().addComponents(details)));
+    }
+    if (interaction.isModalSubmit() && interaction.customId === "partnership_modal") {
+      const details = `**Server / Company:** ${interaction.fields.getTextInputValue("partner_name")}\n**Partnership details:** ${interaction.fields.getTextInputValue("partner_details")}`;
+      await interaction.deferReply({ ephemeral: true }); return interaction.editReply(await createTicket({ guild: interaction.guild, user: interaction.user, member: interaction.member }, "partnership", details));
+    }
     if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal:")) {
       const categoryId = interaction.customId.split(":")[1];
       const details = categoryId === "billing"
@@ -234,6 +254,7 @@ client.on("interactionCreate", async interaction => {
       const ctx = { guild: interaction.guild, channel: interaction.channel, user: interaction.user, member: interaction.member, reply: x => interaction.reply(x) };
       const c = interaction.commandName;
       const args = {};
+      if (c === "partner") { args.subcommand = interaction.options.getSubcommand(); args.channel = interaction.options.getChannel("channel"); }
       if (c === "ticket") args.category = interaction.options.getString("category");
       if (c === "close") args.reason = interaction.options.getString("reason") || "No reason provided";
       if (c === "add" || c === "remove") args.user = interaction.options.getUser("user");
