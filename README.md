@@ -37,10 +37,11 @@ Open **OAuth2 → URL Generator**. Select the `bot` and `applications.commands` 
 2. Choose **Create Deployment** and select the **Node.js** runtime.
 3. Choose **Import from GitHub** and select `aliyusuf9671-design/Botly-Tickets`.
 4. Use the `main` branch.
-5. Set the startup command to `npm start`.
-6. Deploy the service.
+5. Set the install command to `npm install` if the panel has an install-command field.
+6. Set the startup command to `npm start`.
+7. Deploy the service.
 
-The repository includes `package.json`, so the host should install dependencies automatically. If the dashboard asks for an install command, use `npm install`.
+The repository includes `package.json` and `package-lock.json`, so the host should install `discord.js` automatically. The `npm start` lifecycle also has a safety `prestart` install step for panels that skip the install command.
 
 **Important:** Do not set the startup file or command to `.env`. `.env` is a configuration file, not a JavaScript module. Set the startup command to `npm start` (or `node src/index.js`) and add `DISCORD_TOKEN` in Bot-Hosting.net's environment-variable manager. A physical `.env` file is not required on the host.
 

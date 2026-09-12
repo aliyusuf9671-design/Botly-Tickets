@@ -4,7 +4,7 @@
   "private": true,
   "description": "Advanced Discord ticket system with panels, modals, claims, transcripts and audit logs",
   "main": "src/index.js",
-  "scripts": { "start": "node src/index.js", "check": "node --check src/index.js" },
+  "scripts": { "prestart": "npm install --omit=dev --no-audit --no-fund", "start": "node src/index.js", "check": "node --check src/index.js" },
   "engines": { "node": ">=20" },
   "dependencies": { "discord.js": "^14.25.1", "dotenv": "^16.6.1" }
 }
