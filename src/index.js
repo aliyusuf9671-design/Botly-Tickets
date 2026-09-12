@@ -20,11 +20,13 @@ const config = {
   maxTickets: Math.max(1, Number(process.env.MAX_TICKETS_PER_USER || 3)),
   autoCloseHours: Math.max(0, Number(process.env.AUTO_CLOSE_HOURS || 0))
 };
+const LILAC = 0xc8a2c8;
 const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
 const dbFile = path.join(dataDir, "tickets.json");
 let db = { nextNumber: 1, tickets: {}, events: [] };
 try { db = { ...db, ...JSON.parse(fs.readFileSync(dbFile, "utf8")) }; } catch {}
+db.stickyPanels ||= [];
 const save = () => fs.writeFileSync(dbFile, JSON.stringify(db, null, 2));
 const now = () => new Date().toISOString();
 const safe = value => String(value || "").replace(/[\\/:*?"<>|]/g, "-").slice(0, 70);
@@ -47,7 +49,7 @@ const ticketById = id => db.tickets[id];
 const isStaff = member => Boolean(member?.permissions?.has(PermissionsBitField.Flags.ManageChannels) || (config.supportRoleId && member?.roles?.cache?.has(config.supportRoleId)));
 const ticketEmbed = (ticket, title = "Support Ticket") => {
   const category = categoryFor(ticket.category);
-  return new EmbedBuilder().setColor(ticket.priority === "urgent" ? 0xed4245 : ticket.priority === "high" ? 0xfee75c : 0x5865f2)
+  return new EmbedBuilder().setColor(LILAC)
     .setTitle(`${category.emoji} ${title}`).setDescription(`Welcome <@${ticket.ownerId}>. A support team member will be with you shortly.\n\n**Category:** ${category.label}\n**Priority:** ${String(ticket.priority || "normal").toUpperCase()}\n**Status:** ${ticket.status}\n**Opened:** <t:${Math.floor(new Date(ticket.createdAt).getTime() / 1000)}:R>\n\nUse the buttons below to manage this ticket.`).setFooter({ text: `Ticket #${ticket.number} • Botly Tickets` }).setTimestamp();
 };
 const ticketButtons = ticket => new ActionRowBuilder().addComponents(
@@ -62,6 +64,22 @@ const closedTicketButtons = () => new ActionRowBuilder().addComponents(
 );
 const panelComponents = () => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId("ticket_open").setPlaceholder("Choose a support department...").addOptions(categories.map(c => ({ label: c.label, description: c.description, value: c.id, emoji: c.emoji }))));
 const partnershipButton = () => new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("partner_open").setLabel("OPEN A TICKET").setEmoji("📞").setStyle(ButtonStyle.Primary));
+async function postPartnerPanel(channel) {
+  const message = await channel.send({ embeds: [new EmbedBuilder().setColor(LILAC).setTitle("Looking to Partner with us?").setDescription("Open a ticket!")], components: [partnershipButton()] });
+  const existing = db.stickyPanels.find(panel => panel.channelId === channel.id);
+  if (existing) existing.messageId = message.id;
+  else db.stickyPanels.push({ guildId: channel.guild.id, channelId: channel.id, messageId: message.id });
+  save();
+  return message;
+}
+const stickyRefreshes = new Set();
+async function refreshPartnerPanel(channel) {
+  const panel = db.stickyPanels.find(item => item.channelId === channel.id);
+  if (!panel) return;
+  const old = await channel.messages.fetch(panel.messageId).catch(() => null);
+  if (old) { stickyRefreshes.add(old.id); await old.delete().catch(() => {}); }
+  await postPartnerPanel(channel);
+}
 
 const slash = [
   new SlashCommandBuilder().setName("ticket-panel").setDescription("Post the ticket creation panel"),
@@ -123,7 +141,7 @@ async function createTicket(ctx, categoryId, details = "") {
   const ticket = { id, number, guildId: ctx.guild.id, channelId: channel.id, ownerId: ctx.user.id, category: category.id, status: "open", priority: "normal", claimedBy: null, createdAt: now(), updatedAt: now(), closeReason: null };
   db.tickets[id] = ticket; save(); addEvent(ticket, ctx.user.id, "created", category.label);
   await channel.send({ content: `<@${ctx.user.id}>${config.supportRoleId ? ` <@&${config.supportRoleId}>` : ""}`, embeds: [ticketEmbed(ticket)], components: [ticketButtons(ticket)] });
-  if (details) await channel.send({ embeds: [new EmbedBuilder().setColor(0x2b2d31).setTitle("Opening details").setDescription(details).setTimestamp()] });
+  if (details) await channel.send({ embeds: [new EmbedBuilder().setColor(LILAC).setTitle("Opening details").setDescription(details).setTimestamp()] });
   await sendAudit(ctx.guild, `🎫 Ticket #${number} opened by <@${ctx.user.id}> in <#${channel.id}> (${category.label}).`);
   return ok(`Ticket created: <#${channel.id}>`);
 }
@@ -135,7 +153,7 @@ async function closeTicket(ctx, ticket, reason = "No reason provided") {
   ticket.status = "closed"; ticket.closeReason = reason; ticket.updatedAt = now(); save(); addEvent(ticket, ctx.user.id, "closed", reason);
   await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: false }).catch(() => {});
   if (config.closedCategoryId) await channel.setParent(config.closedCategoryId).catch(() => {});
-  await channel.send({ embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("Ticket closed").setDescription(`Closed by <@${ctx.user.id}>\n**Reason:** ${reason}\nThis channel is now read-only. Staff can reopen it or permanently delete it.`).setTimestamp()], components: [closedTicketButtons()] });
+  await channel.send({ embeds: [new EmbedBuilder().setColor(LILAC).setTitle("Ticket closed").setDescription(`Closed by <@${ctx.user.id}>\n**Reason:** ${reason}\nThis channel is now read-only. Staff can reopen it or permanently delete it.`).setTimestamp()], components: [closedTicketButtons()] });
   await sendAudit(ctx.guild, `🔒 Ticket #${ticket.number} closed by <@${ctx.user.id}>. Reason: ${reason}`, attachment);
   return ok(`Ticket #${ticket.number} closed and transcript logged.`);
 }
@@ -177,12 +195,12 @@ async function handleCommand(ctx, command, args = {}) {
     if (!canStaff(ctx)) return ctx.reply(fail("Only support staff can post partnership panels."));
     const target = args.channel;
     if (!target?.isTextBased()) return ctx.reply(fail("Choose a text channel for the partnership message."));
-    await target.send({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("Looking to Partner with us?").setDescription("Open a ticket!")], components: [partnershipButton()] });
+    await postPartnerPanel(target);
     return ctx.reply(ok(`Partnership ticket message posted in <#${target.id}>.`));
   }
   if (command === "ticket-panel") {
     if (!canStaff(ctx)) return fail("Only support staff can post ticket panels.");
-    return ctx.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("📞  |  Contact Botly.Dev Support").setDescription("Choose an Area / Category Based On Your Needs.\n\n**Note:** For Purchases Please Read Pricing.")], components: [panelComponents()] });
+    return ctx.reply({ embeds: [new EmbedBuilder().setColor(LILAC).setTitle("📞  |  Contact Botly.Dev Support").setDescription("Choose an Area / Category Based On Your Needs.\n\n**Note:** For Purchases Please Read Pricing.")], components: [panelComponents()] });
   }
   if (command === "ticket") return ctx.reply(await createTicket(ctx, args.category, args.details));
   const ticket = currentTicket(ctx);
@@ -199,8 +217,8 @@ async function handleCommand(ctx, command, args = {}) {
   if (command === "rename") { if (!ticket || !canStaff(ctx)) return ctx.reply(fail("Only support staff can rename a ticket.")); await ctx.channel.setName(safe(args.name)); addEvent(ticket, ctx.user.id, "renamed", args.name); return ctx.reply(ok(`Ticket renamed to **${safe(args.name)}**.`)); }
   if (command === "priority") { if (!ticket || !canStaff(ctx)) return ctx.reply(fail("Only support staff can change priority.")); ticket.priority = args.level; ticket.updatedAt = now(); save(); addEvent(ticket, ctx.user.id, "priority", args.level); return ctx.reply(ok(`Priority set to **${args.level}**.`)); }
   if (command === "transcript") { if (!ticket || !canManage(ctx, ticket)) return ctx.reply(fail("Only the ticket owner or support staff can create transcripts.")); const file = await buildTranscript(ctx.channel, ticket); await sendAudit(ctx.guild, `📄 Manual transcript for ticket #${ticket.number} requested by <@${ctx.user.id}>.`, file); return ctx.reply(ok("Transcript generated and sent to the ticket log channel.")); }
-  if (command === "ticket-stats") { if (!canStaff(ctx)) return ctx.reply(fail("Only support staff can view ticket statistics.")); const all = Object.values(db.tickets).filter(t => t.guildId === ctx.guild.id); const open = all.filter(t => ["open", "claimed"].includes(t.status)).length; const closed = all.filter(t => t.status === "closed").length; const claimed = all.filter(t => t.claimedBy).length; return ctx.reply({ embeds: [new EmbedBuilder().setTitle("Ticket statistics").setColor(0x5865f2).setDescription(`**Total tickets:** ${all.length}\n**Open:** ${open}\n**Closed:** ${closed}\n**Ever claimed:** ${claimed}\n**Audit events:** ${db.events.filter(e => all.some(t => t.id === e.ticketId)).length}`).setTimestamp()] }); }
-  if (command === "ticket-help") return ctx.reply({ embeds: [new EmbedBuilder().setTitle("Botly Tickets help").setColor(0x5865f2).setDescription("**Staff:** `/ticket-panel`, `/claim`, `/reopen`, `/add`, `/remove`, `/rename`, `/priority`, `/transcript`, `/ticket-stats`\n**Everyone:** `/ticket`, `/close`, `/ticket-help`\n\nTickets include private channels, category routing, claims, participants, priorities, transcripts, audit logs and limits.")] });
+  if (command === "ticket-stats") { if (!canStaff(ctx)) return ctx.reply(fail("Only support staff can view ticket statistics.")); const all = Object.values(db.tickets).filter(t => t.guildId === ctx.guild.id); const open = all.filter(t => ["open", "claimed"].includes(t.status)).length; const closed = all.filter(t => t.status === "closed").length; const claimed = all.filter(t => t.claimedBy).length; return ctx.reply({ embeds: [new EmbedBuilder().setTitle("Ticket statistics").setColor(LILAC).setDescription(`**Total tickets:** ${all.length}\n**Open:** ${open}\n**Closed:** ${closed}\n**Ever claimed:** ${claimed}\n**Audit events:** ${db.events.filter(e => all.some(t => t.id === e.ticketId)).length}`).setTimestamp()] }); }
+  if (command === "ticket-help") return ctx.reply({ embeds: [new EmbedBuilder().setTitle("Botly Tickets help").setColor(LILAC).setDescription("**Staff:** `/ticket-panel`, `/claim`, `/reopen`, `/add`, `/remove`, `/rename`, `/priority`, `/transcript`, `/ticket-stats`\n**Everyone:** `/ticket`, `/close`, `/ticket-help`\n\nTickets include private channels, category routing, claims, participants, priorities, transcripts, audit logs and limits.")] });
   return ctx.reply(fail("Unknown ticket command."));
 }
 
@@ -267,6 +285,7 @@ client.on("interactionCreate", async interaction => {
 
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.guild) return;
+  if (db.stickyPanels.some(panel => panel.channelId === message.channel.id)) await refreshPartnerPanel(message.channel).catch(error => console.error("sticky panel refresh error", error));
   const match = message.content.match(new RegExp(`^\\${prefix}([\\w-]+)(?:\\s+([\\s\\S]*))?$`, "i"));
   if (!match) return;
   const aliases = { panel: "ticket-panel", tickets: "ticket-help", close: "close", reopen: "reopen", delete: "delete", del: "delete", claim: "claim", unclaim: "unclaim", add: "add", remove: "remove", rename: "rename", priority: "priority", transcript: "transcript", stats: "ticket-stats", help: "ticket-help", open: "ticket" };
@@ -279,6 +298,13 @@ client.on("messageCreate", async message => {
   if (command === "priority") args.level = raw.toLowerCase();
   if (command === "add" || command === "remove") args.user = message.mentions.users.first();
   await handleCommand(ctx, command, args).catch(error => message.reply(explain(error)));
+});
+client.on("messageDelete", async message => {
+  const panel = db.stickyPanels.find(item => item.messageId === message.id);
+  if (!panel) return;
+  if (stickyRefreshes.has(message.id)) { stickyRefreshes.delete(message.id); return; }
+  const channel = await client.channels.fetch(panel.channelId).catch(() => null);
+  if (channel?.isTextBased()) await postPartnerPanel(channel).catch(error => console.error("sticky panel restore error", error));
 });
 
 client.once("ready", async () => {

@@ -8,6 +8,8 @@
 - Panel wording: “Choose an Area / Category Based On Your Needs.” with the note “For Purchases Please Read Pricing.”
 - Billing intake form: **Item / Service**, **Payment Method**, and optional **Extra Info**.
 - Partnership sticky panel with an **OPEN A TICKET** button and `partnership-####` ticket channels.
+- Partnership panels stay at the bottom of their selected channel by reposting after new messages or manual deletion.
+- All Botly embeds use the lilac theme color.
 - Modal intake form requiring useful opening details.
 - Private ticket channels with configurable category routing and support role access.
 - Ticket lifecycle: open, claimed, closed, and reopened.
