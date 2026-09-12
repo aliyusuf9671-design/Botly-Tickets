@@ -159,7 +159,7 @@ async function participant(ctx, ticket, user, adding) {
 async function handleCommand(ctx, command, args = {}) {
   if (command === "ticket-panel") {
     if (!canStaff(ctx)) return fail("Only support staff can post ticket panels.");
-    return ctx.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("🎫 Contact Support").setDescription("Choose a department below to open a private ticket. Please include clear details so the team can help you quickly.\n\nYou can have up to **" + config.maxTickets + "** open ticket(s).")], components: [panelComponents()] });
+    return ctx.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("📞  |  Contact Botly.Dev Support").setDescription("Choose an Area / Category Based On Your Needs.\n\n**Note:** For Purchases Please Read Pricing.")], components: [panelComponents()] });
   }
   if (command === "ticket") return ctx.reply(await createTicket(ctx, args.category, args.details));
   const ticket = currentTicket(ctx);
@@ -179,11 +179,21 @@ client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isStringSelectMenu() && interaction.customId === "ticket_open") {
       const modal = new ModalBuilder().setCustomId(`ticket_modal:${interaction.values[0]}`).setTitle(`${categoryFor(interaction.values[0]).label} request`);
+      if (interaction.values[0] === "billing") {
+        const item = new TextInputBuilder().setCustomId("billing_item").setLabel("Item / Service").setStyle(TextInputStyle.Short).setPlaceholder("What item or service is this about?").setRequired(true).setMaxLength(100);
+        const payment = new TextInputBuilder().setCustomId("billing_payment").setLabel("Payment Method").setStyle(TextInputStyle.Short).setPlaceholder("PayPal, card, bank transfer, etc.").setRequired(true).setMaxLength(100);
+        const extra = new TextInputBuilder().setCustomId("billing_extra").setLabel("Extra Info (not required)").setStyle(TextInputStyle.Paragraph).setPlaceholder("Anything else we should know?").setRequired(false).setMaxLength(1000);
+        return interaction.showModal(modal.addComponents(new ActionRowBuilder().addComponents(item), new ActionRowBuilder().addComponents(payment), new ActionRowBuilder().addComponents(extra)));
+      }
       const details = new TextInputBuilder().setCustomId("details").setLabel("How can we help?").setStyle(TextInputStyle.Paragraph).setPlaceholder("Include relevant details, links or error messages...").setRequired(true).setMaxLength(2000);
       return interaction.showModal(modal.addComponents(new ActionRowBuilder().addComponents(details)));
     }
     if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal:")) {
-      await interaction.deferReply({ ephemeral: true }); return interaction.editReply(await createTicket({ guild: interaction.guild, user: interaction.user, member: interaction.member }, interaction.customId.split(":")[1], interaction.fields.getTextInputValue("details")));
+      const categoryId = interaction.customId.split(":")[1];
+      const details = categoryId === "billing"
+        ? `**Item / Service:** ${interaction.fields.getTextInputValue("billing_item")}\n**Payment Method:** ${interaction.fields.getTextInputValue("billing_payment")}\n**Extra Info:** ${interaction.fields.getTextInputValue("billing_extra") || "Not provided"}`
+        : interaction.fields.getTextInputValue("details");
+      await interaction.deferReply({ ephemeral: true }); return interaction.editReply(await createTicket({ guild: interaction.guild, user: interaction.user, member: interaction.member }, categoryId, details));
     }
     if (interaction.isButton()) {
       const ticket = currentTicket(interaction); const ctx = { guild: interaction.guild, channel: interaction.channel, user: interaction.user, member: interaction.member, reply: x => interaction.reply(x) };

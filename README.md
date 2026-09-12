@@ -4,7 +4,9 @@
 
 ## Features
 
-- Ticket creation panel with department dropdown: General, Billing, Technical, and Reports.
+- Ticket creation panel titled **📞 | Contact Botly.Dev Support** with department dropdown: General, Billing, Technical, and Reports.
+- Panel wording: “Choose an Area / Category Based On Your Needs.” with the note “For Purchases Please Read Pricing.”
+- Billing intake form: **Item / Service**, **Payment Method**, and optional **Extra Info**.
 - Modal intake form requiring useful opening details.
 - Private ticket channels with configurable category routing and support role access.
 - Ticket lifecycle: open, claimed, closed, and reopened.
